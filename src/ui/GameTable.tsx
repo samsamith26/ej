@@ -1,7 +1,7 @@
-import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
-import { arrayMove, rectSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable';
+import { DndContext, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { arrayMove, horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   canReplaceWild,
   canTakeWildWithoutReplacement,
@@ -66,7 +66,7 @@ export function GameTable({ view, names, dispatch, conn, onError, orderKey }: Pr
   const [order, setOrder] = useState<SavedOrder>(() => loadOrder(orderKey));
   const [builderOpen, setBuilderOpen] = useState(false);
   const [choice, setChoice] = useState<{ title: string; choices: Choice[] } | null>(null);
-  const [sideOpen, setSideOpen] = useState(false);
+  const [panel, setPanel] = useState<'scores' | 'log' | null>(null);
 
   // Any new state from the host (a draw, a committed turn, a new round) resets the staged plan.
   const stateKey = `${view.round}:${view.turn}:${view.phase}:${view.log.length}`;
@@ -125,10 +125,18 @@ export function GameTable({ view, names, dispatch, conn, onError, orderKey }: Pr
   };
   const sortBy = (mode: SortMode) => setShownOrder(sortHand(hand, mode).map((c) => c.id));
 
-  // A drag starts only after ~5px of movement, so a plain click still selects.
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // Mouse: a drag starts after ~5px of movement, so a plain click still selects.
+  // Touch: press and hold ~200ms to pick a card up, so taps select and swipes
+  // scroll the hand; once dragging, dnd-kit blocks the page from scrolling.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+  );
   const justDragged = useRef(false);
+  const onDragStart = () => document.documentElement.classList.add('dragging');
+  const onDragCancel = () => document.documentElement.classList.remove('dragging');
   const onDragEnd = ({ active, over }: DragEndEvent) => {
+    onDragCancel();
     // The browser may still fire a click on the dropped card; ignore it.
     justDragged.current = true;
     setTimeout(() => (justDragged.current = false), 0);
@@ -238,36 +246,55 @@ export function GameTable({ view, names, dispatch, conn, onError, orderKey }: Pr
   const [under, top] = view.discardTopTwo.length === 2 ? view.discardTopTwo : [null, view.discardTopTwo[0] ?? null];
   const takeCount = Math.min(2, view.discardCount);
 
+  const canDrawStock = view.stockCount > 0 || view.discardCount > 1;
+  const bookPill = (laid: boolean, staged = false) => (
+    <span className={`pill ${laid ? 'on' : ''}`}>{laid ? 'Book laid' : staged ? 'Book staged' : 'No book yet'}</span>
+  );
+  const ownersWithMelds = ([opp, me] as PlayerId[]).filter((o) => byOwner(o).length > 0);
+  const togglePanel = (p: 'scores' | 'log') => setPanel((cur) => (cur === p ? null : p));
+
   return (
     <div className="table">
       <header className="topbar">
-        <div className="brand">EJ</div>
-        <div className="round">
-          <strong>Round {view.round} of 5</strong>
-          <span>
+        <div className="brand" aria-hidden="true">
+          EJ
+        </div>
+        <div className="round" title={`Round ${view.round} of 5. Book: ${def.description} (${def.bookSize} cards)`}>
+          <strong>
+            Round {view.round}
+            <span className="lbl-long"> of 5</span>
+            <span className="lbl-short">/5</span>
+          </strong>
+          <span className="book">
             Book: {def.description} <span className="muted">({def.bookSize} cards)</span>
           </span>
         </div>
-        <div className={`conn ${conn.tone}`}>
+        <div className={`conn ${conn.tone}`} title={conn.text} role="status">
           <span className="dot" />
-          {conn.text}
+          <span className="conn-text">{conn.text}</span>
         </div>
-        <button className="btn ghost side-toggle" type="button" onClick={() => setSideOpen((o) => !o)} aria-expanded={sideOpen}>
-          {sideOpen ? 'Close' : 'Scores & log'}
-        </button>
+        {/* Phones: scores and the move log live in a drawer. */}
+        <div className="panel-toggles">
+          <button className={`btn ghost ${panel === 'scores' ? 'active' : ''}`} type="button" aria-expanded={panel === 'scores'} onClick={() => togglePanel('scores')}>
+            Scores
+          </button>
+          <button className={`btn ghost ${panel === 'log' ? 'active' : ''}`} type="button" aria-expanded={panel === 'log'} onClick={() => togglePanel('log')}>
+            Log
+          </button>
+        </div>
       </header>
 
       <div className="layout">
         <main className="play">
           <section className={`opponent ${!myTurn && !roundOver ? 'their-turn' : ''}`} aria-label="Opponent">
-            <div className="who">
-              <strong>{names[opp]}</strong>
-              <span className="muted">
-                {view.opponentHandCount} cards{view.dealer === opp ? ' · dealer' : ''}
-              </span>
-              <span className={`pill ${view.bookLaid[opp] ? 'on' : ''}`}>{view.bookLaid[opp] ? 'Book laid' : 'No book yet'}</span>
-            </div>
-            <div className="backs">
+            <strong className="opp-name">{names[opp]}</strong>
+            <span className="muted nowrap">
+              {view.opponentHandCount} cards{view.dealer === opp ? ' · dealer' : ''}
+            </span>
+            {bookPill(view.bookLaid[opp])}
+            {/* Phones: connection trouble shows here instead of the crowded top bar. */}
+            {conn.tone === 'warn' && <span className="opp-conn">{conn.text}</span>}
+            <div className="backs" aria-hidden="true">
               {Array.from({ length: Math.min(view.opponentHandCount, 14) }, (_, i) => (
                 <CardBack key={i} small />
               ))}
@@ -324,10 +351,13 @@ export function GameTable({ view, names, dispatch, conn, onError, orderKey }: Pr
             </div>
 
             <div className="melds">
-              {([opp, me] as PlayerId[]).map((owner) => (
+              {ownersWithMelds.length === 0 && <p className="muted small">No melds on the table yet.</p>}
+              {ownersWithMelds.map((owner) => (
                 <div key={owner} className="meld-group">
-                  <h3>{owner === me ? 'Your melds' : `${names[opp]}’s melds`}</h3>
-                  {byOwner(owner).length === 0 && <p className="muted small">Nothing laid yet.</p>}
+                  <h3>
+                    <span className="lbl-long">{owner === me ? 'Your melds' : `${names[opp]}’s melds`}</span>
+                    <span className="lbl-short">{owner === me ? 'You' : names[opp]}</span>
+                  </h3>
                   <div className="meld-row">
                     {byOwner(owner).map((m) => {
                       // On the book turn only your own melds are valid lay-off targets.
@@ -380,33 +410,96 @@ export function GameTable({ view, names, dispatch, conn, onError, orderKey }: Pr
           </section>
 
           <section className={`mine ${myTurn && !roundOver ? 'my-turn' : ''}`} aria-label="Your hand">
-            <div className="status">
-              <strong>{status}</strong>
-              {hint && <span className="hint">{hint}</span>}
-            </div>
-            <div className="hand-bar">
-              <span>
-                <strong>{names[me]}</strong>
-                <span className="muted">
-                  {' '}
+            <div className="status-row">
+              <div className="status">
+                <strong>{status}</strong>
+                {hint && <span className="hint">{hint}</span>}
+              </div>
+              <div className="me-meta">
+                <span className="muted nowrap">
                   {hand.length} cards{view.dealer === me ? ' · dealer' : ''}
                 </span>
-                <span className={`pill ${view.bookLaid[me] ? 'on' : ''}`}>
-                  {view.bookLaid[me] ? 'Book laid' : bookThisTurn ? 'Book staged' : 'No book yet'}
-                </span>
-              </span>
-              <span className="sort-buttons">
-                <button className="btn ghost" type="button" onClick={() => sortBy('rank')}>
-                  Sort by rank
+                {bookPill(view.bookLaid[me], bookThisTurn)}
+              </div>
+            </div>
+
+            {/* Only the actions that are legal right now. */}
+            <div className="action-bar" role="toolbar" aria-label="Actions">
+              {myTurn && view.phase === 'draw' && (
+                <>
+                  {canDrawStock && (
+                    <button className="btn primary" type="button" onClick={() => draw('drawStock')}>
+                      <span className="lbl-long">Draw from stock</span>
+                      <span className="lbl-short">Draw</span>
+                    </button>
+                  )}
+                  {view.canTakeDiscard && (
+                    <button className="btn" type="button" onClick={() => draw('drawDiscard')}>
+                      Take {takeCount}
+                    </button>
+                  )}
+                </>
+              )}
+              {planning && !bookLaid && (
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={selected.length !== def.bookSize}
+                  onClick={() => setBuilderOpen(true)}
+                  title={`Select exactly ${def.bookSize} cards`}
+                >
+                  Lay book{' '}
+                  <span className="count">
+                    {selected.length}/{def.bookSize}
+                  </span>
                 </button>
-                <button className="btn ghost" type="button" onClick={() => sortBy('suit')}>
-                  Sort by suit
+              )}
+              {planning && oneSelected && (
+                <button className="btn primary" type="button" onClick={discard}>
+                  <span className="lbl-long">{discardWouldGoOut ? 'Discard and go out' : 'Discard and end turn'}</span>
+                  <span className="lbl-short">{discardWouldGoOut ? 'Go out' : 'Discard'}</span>
+                </button>
+              )}
+              {planning && plan.length > 0 && (
+                <>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() => {
+                      setPlan(plan.slice(0, -1));
+                      setSelected([]);
+                    }}
+                  >
+                    Undo<span className="lbl-long"> step</span>
+                  </button>
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() => {
+                      setPlan([]);
+                      setSelected([]);
+                    }}
+                  >
+                    Reset<span className="lbl-long"> turn</span>
+                  </button>
+                </>
+              )}
+              <span className="sort-buttons" role="group" aria-label="Sort hand">
+                <button className="btn ghost" type="button" aria-label="Sort by rank" onClick={() => sortBy('rank')}>
+                  <span className="lbl-long">Sort by rank</span>
+                  <span className="lbl-short">Rank</span>
+                </button>
+                <button className="btn ghost" type="button" aria-label="Sort by suit" onClick={() => sortBy('suit')}>
+                  <span className="lbl-long">Sort by suit</span>
+                  <span className="lbl-short">Suit</span>
                 </button>
               </span>
             </div>
-            <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-              <SortableContext items={hand.map((c) => c.id)} strategy={rectSortingStrategy}>
-                <div className="hand" title="Drag cards to reorder your hand">
+
+            <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={onDragCancel}>
+              <SortableContext items={hand.map((c) => c.id)} strategy={horizontalListSortingStrategy}>
+                {/* --n lets CSS overlap the cards just enough to fit one row. */}
+                <div className="hand" style={{ '--n': hand.length } as CSSProperties} title="Drag cards to reorder your hand">
                   {hand.map((c) => (
                     <SortableCard key={c.id} id={c.id}>
                       <CardFace
@@ -420,43 +513,17 @@ export function GameTable({ view, names, dispatch, conn, onError, orderKey }: Pr
                 </div>
               </SortableContext>
             </DndContext>
-            {planning && (
-              <div className="actions">
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={bookLaid || selected.length !== def.bookSize}
-                  onClick={() => setBuilderOpen(true)}
-                  title={bookLaid ? 'Your book is already down' : `Select exactly ${def.bookSize} cards`}
-                >
-                  Lay book{!bookLaid && selected.length !== def.bookSize ? ` (select ${def.bookSize})` : ''}
-                </button>
-                <button
-                  className="btn primary"
-                  type="button"
-                  disabled={!oneSelected}
-                  onClick={discard}
-                >
-                  {discardWouldGoOut ? 'Discard and go out' : 'Discard and end turn'}
-                </button>
-                <button className="btn ghost" type="button" disabled={plan.length === 0} onClick={() => {
-                    setPlan(plan.slice(0, -1));
-                    setSelected([]);
-                  }}>
-                  Undo step
-                </button>
-                <button className="btn ghost" type="button" disabled={plan.length === 0} onClick={() => {
-                    setPlan([]);
-                    setSelected([]);
-                  }}>
-                  Reset turn
-                </button>
-              </div>
-            )}
           </section>
         </main>
 
-        <aside className={`side ${sideOpen ? 'open' : ''}`}>
+        {panel && <div className="drawer-backdrop" onClick={() => setPanel(null)} />}
+        <aside className={`side ${panel ? `open show-${panel}` : ''}`} aria-label="Scores and moves">
+          <div className="drawer-head">
+            <strong>{panel === 'log' ? 'Moves' : 'Scores'}</strong>
+            <button className="btn ghost" type="button" onClick={() => setPanel(null)}>
+              Close
+            </button>
+          </div>
           <Scoreboard view={view} names={names} />
           <section className="log" aria-label="Move log">
             <h3>Moves</h3>

@@ -17,10 +17,23 @@
   --ok: #7cc49a;
   --warn: #e7a35b;
 
-  --card-w: clamp(46px, 5.6vw, 76px);
-  --card-h: calc(var(--card-w) * 1.4);
-  --card-sm: clamp(34px, 3.6vw, 50px);
+  /*
+   * Card sizes scale with the viewport: width-bound in portrait, height-bound
+   * in landscape, and capped for desktop. (vh first as a fallback for
+   * browsers without dvh.)
+   */
+  --card-w: clamp(44px, min(14vw, 10vh), 76px);
+  --card-w: clamp(44px, min(14vw, 10dvh), 76px);
+  --pile-w: clamp(40px, min(12vw, 9dvh), 72px);
+  --card-sm: clamp(30px, min(9vw, 6.5dvh), 50px);
+  --lift: calc(var(--card-w) * 0.3);
   --radius-card: 7px;
+  --tap: 44px;
+
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
 
   --serif: 'Young Serif', Georgia, serif;
   --sans: 'Figtree', system-ui, sans-serif;
@@ -49,6 +62,18 @@ body {
     repeating-linear-gradient(45deg, var(--lattice) 0 1px, transparent 1px 22px),
     repeating-linear-gradient(-45deg, var(--lattice) 0 1px, transparent 1px 22px);
   min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* The game table never scrolls the page (and no pull-to-refresh mid-drag). */
+html:has(.table) {
+  overscroll-behavior: none;
+}
+html.dragging,
+html.dragging body {
+  overflow: hidden;
+  touch-action: none;
 }
 
 a {
@@ -68,10 +93,18 @@ h3 {
 .small {
   font-size: 13px;
 }
+.nowrap {
+  white-space: nowrap;
+}
 
 :focus-visible {
   outline: 2px solid var(--brass);
   outline-offset: 2px;
+}
+
+/* Long labels on roomy screens, short ones in compact mode (see the end). */
+.lbl-short {
+  display: none;
 }
 
 /* ---- Buttons & fields ----------------------------------------------------- */
@@ -82,12 +115,17 @@ h3 {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 10px 18px;
+  min-height: var(--tap);
+  padding: 0 18px;
   cursor: pointer;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  flex: none;
+  -webkit-tap-highlight-color: transparent;
 }
 .btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.14);
@@ -107,6 +145,14 @@ h3 {
 .btn.ghost {
   background: transparent;
 }
+.btn.ghost.active {
+  border-color: var(--brass);
+  color: var(--brass);
+}
+.btn .count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
 
 .field {
   display: grid;
@@ -117,19 +163,23 @@ h3 {
 .field.inline {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   font-weight: 500;
   margin-top: 8px;
 }
 input,
 select {
+  /* 16px stops iOS from zooming into fields. */
   font: 16px var(--sans);
-  padding: 10px 12px;
+  min-height: var(--tap);
+  padding: 0 12px;
   border-radius: 8px;
   border: 1px solid var(--stock-edge);
   background: #fff;
   color: var(--ink);
   min-width: 0;
+  max-width: 100%;
 }
 
 .stack {
@@ -150,9 +200,10 @@ select {
 
 .lobby {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 24px 16px;
+  padding: calc(var(--safe-t) + 24px) calc(var(--safe-r) + 16px) calc(var(--safe-b) + 24px) calc(var(--safe-l) + 16px);
 }
 .bigcard {
   position: relative;
@@ -184,6 +235,7 @@ select {
 .bigcard-body {
   display: grid;
   gap: 18px;
+  min-width: 0;
 }
 .bigcard-body p {
   margin: 0;
@@ -212,6 +264,9 @@ select {
 .rules summary {
   cursor: pointer;
   font-weight: 600;
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
 }
 .rules ol {
   padding-left: 20px;
@@ -258,7 +313,7 @@ select {
 .card {
   position: relative;
   width: var(--card-w);
-  height: var(--card-h);
+  height: calc(var(--card-w) * 1.4);
   flex: none;
   border-radius: var(--radius-card);
   background: var(--stock);
@@ -268,6 +323,10 @@ select {
   padding: 0;
   color: var(--ink);
   transition: transform 0.12s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 .card.red {
   color: var(--crimson);
@@ -275,19 +334,24 @@ select {
 .card.small {
   width: var(--card-sm);
   height: calc(var(--card-sm) * 1.4);
+  border-radius: 5px;
 }
 .card .idx {
   position: absolute;
-  font-size: calc(var(--card-w) * 0.22);
+  font-size: max(11px, calc(var(--card-w) * 0.24));
   line-height: 1;
   text-align: center;
 }
 .card.small .idx {
-  font-size: calc(var(--card-sm) * 0.26);
+  font-size: max(9px, calc(var(--card-sm) * 0.28));
 }
 .card .idx.tl {
   top: 4px;
   left: 4px;
+}
+.card.small .idx.tl {
+  top: 3px;
+  left: 3px;
 }
 .card .idx.br {
   bottom: 4px;
@@ -309,6 +373,7 @@ select {
   background: #f6e6c2;
   border-color: #d9b56a;
 }
+/* Badges sit above neighbouring cards, which may overlap this one. */
 .card .badge {
   position: absolute;
   left: 50%;
@@ -320,6 +385,7 @@ select {
   padding: 3px 6px;
   border-radius: 999px;
   white-space: nowrap;
+  z-index: 3;
 }
 .card .note {
   position: absolute;
@@ -332,24 +398,28 @@ select {
   padding: 3px 6px;
   border-radius: 999px;
   white-space: nowrap;
+  z-index: 3;
 }
 .card.clickable {
   cursor: pointer;
 }
-.card.clickable:hover:not(:disabled) {
-  transform: translateY(-3px);
-}
 .card.clickable:disabled {
   cursor: not-allowed;
 }
+@media (hover: hover) {
+  .card.clickable:hover:not(:disabled) {
+    transform: translateY(-3px);
+  }
+  /* Must out-rank the rule above, or hovering a selected card drops it. */
+  .card.clickable.selected:hover:not(:disabled) {
+    transform: translateY(calc(-1 * var(--lift) - 2px));
+  }
+}
 .card.selected {
-  transform: translateY(-14px);
+  transform: translateY(calc(-1 * var(--lift)));
   box-shadow:
     0 0 0 3px var(--brass),
     0 10px 16px rgba(0, 0, 0, 0.35);
-}
-.card.selected:hover {
-  transform: translateY(-16px);
 }
 .card.back {
   background-color: #8a1f2f;
@@ -357,6 +427,9 @@ select {
     repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.16) 0 1px, transparent 1px 6px),
     repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.16) 0 1px, transparent 1px 6px);
   border: 3px solid var(--stock);
+}
+.card.small.back {
+  border-width: 2px;
 }
 .card.empty {
   background: transparent;
@@ -367,23 +440,30 @@ select {
 /* ---- Game table ----------------------------------------------------------- */
 
 .table {
-  /* Fixed to the viewport: the meld area scrolls, the hand stays in view. */
+  /* Exactly one screen tall: melds scroll inside, the hand stays at the bottom. */
   height: 100vh;
   height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  padding: 0 var(--safe-r) var(--safe-b) var(--safe-l);
 }
 .topbar {
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: 10px 16px;
+  padding: calc(var(--safe-t) + 10px) calc(var(--safe-r) + 16px) 10px calc(var(--safe-l) + 16px);
+  /* Bleed the bar's background into the side safe areas. */
+  margin: 0 calc(-1 * var(--safe-r)) 0 calc(-1 * var(--safe-l));
   background: var(--table-deep);
   border-bottom: 1px solid var(--line);
+  flex: none;
+  min-width: 0;
 }
 .brand {
   font: 26px/1 var(--serif);
   color: var(--brass);
+  flex: none;
 }
 .round {
   display: flex;
@@ -398,6 +478,7 @@ select {
   gap: 8px;
   font-size: 13px;
   font-weight: 600;
+  flex: none;
 }
 .conn.ok .dot {
   color: var(--ok);
@@ -405,32 +486,37 @@ select {
 .conn.warn {
   color: var(--warn);
 }
-.side-toggle {
+.panel-toggles {
+  display: none;
+  gap: 6px;
+  flex: none;
+}
+.opp-conn {
   display: none;
 }
 
 .layout {
   flex: 1;
-  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 290px;
   min-height: 0;
 }
 .play {
-  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 14px 16px 18px;
+  padding: 14px 16px 12px;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .opponent,
 .mine {
-  flex: none;
   border-radius: 14px;
   padding: 10px 14px;
   border: 1px solid transparent;
+  flex: none;
 }
 .their-turn,
 .my-turn {
@@ -440,17 +526,20 @@ select {
 .opponent {
   display: flex;
   align-items: center;
-  gap: 18px;
-  flex-wrap: wrap;
-}
-.who {
-  display: flex;
-  align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  min-width: 0;
+}
+.opp-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 .backs {
   display: flex;
+  margin-left: 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 .backs .card + .card {
   margin-left: calc(var(--card-sm) * -0.62);
@@ -462,7 +551,8 @@ select {
   border-radius: 999px;
   padding: 2px 9px;
   color: var(--muted);
-  margin-left: 8px;
+  white-space: nowrap;
+  flex: none;
 }
 .pill.on {
   color: var(--ink);
@@ -470,25 +560,27 @@ select {
   border-color: var(--brass);
 }
 
+/* Piles beside the melds; the melds scroll on their own. */
 .center {
   flex: 1;
-  overflow: auto;
-  padding-bottom: 12px;
   display: flex;
   gap: 22px;
-  align-items: flex-start;
+  align-items: stretch;
   min-height: 0;
 }
 .piles {
   display: flex;
   gap: 14px;
   flex: none;
+  align-self: flex-start;
   /* Room for the "Taken" labels above the cards. */
   padding-top: 14px;
+  --card-w: var(--pile-w);
 }
 .pile {
   display: grid;
   justify-items: center;
+  align-content: start;
   gap: 6px;
   background: none;
   border: 0;
@@ -496,12 +588,15 @@ select {
   color: var(--muted);
   font: 600 12px var(--sans);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 .pile:disabled {
   cursor: default;
 }
-.pile:hover:not(:disabled) .card {
-  transform: translateY(-3px);
+@media (hover: hover) {
+  .pile:hover:not(:disabled) .card {
+    transform: translateY(-3px);
+  }
 }
 
 /* Discard pile: the top two cards, fanned. */
@@ -525,11 +620,12 @@ select {
 .fan-top.solo {
   transform: none;
 }
-.fan:has(.fan-top.solo) {
+.fan:has(.fan-top.solo),
+.fan:has(> .card.empty) {
   padding-left: 0;
 }
 /* The opponent's take: the cards glow, lift slightly off the pile and fade
-   (kept small because the table area scrolls and would clip a big move). */
+   (kept small because the table area clips a big move). */
 .taken {
   position: absolute;
   left: 0;
@@ -563,9 +659,17 @@ select {
 
 .melds {
   flex: 1;
-  display: grid;
-  gap: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 2px 12px;
+}
+.melds > p {
+  margin: 0;
 }
 .meld-group h3 {
   font: 600 13px var(--sans);
@@ -582,6 +686,7 @@ select {
   border-radius: 10px;
   padding: 6px 10px 14px;
   background: rgba(0, 0, 0, 0.12);
+  min-width: 0;
 }
 .meld.target {
   border-color: var(--brass);
@@ -597,42 +702,89 @@ select {
   font-weight: 600;
   color: var(--muted);
   margin-bottom: 4px;
+  white-space: nowrap;
 }
 .meld-cards {
   display: flex;
   gap: 3px;
 }
 
+/* Your area: status, then the action bar, then the hand — always on screen. */
+.mine {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.status-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
 .status {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-bottom: 8px;
+  min-width: 0;
 }
 .hint {
   color: var(--brass);
   font-size: 13px;
 }
-.hand-bar {
+.me-meta {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex: none;
+  font-size: 13px;
 }
-.hand {
+.action-bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 20px 2px 6px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  /* Fallback if the legal actions ever outgrow the row: scroll, don't wrap. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.action-bar::-webkit-scrollbar {
+  display: none;
 }
 .sort-buttons {
   display: flex;
   gap: 4px;
+  margin-left: auto;
+  flex: none;
 }
-/* Hand cards: drag to reorder (touch-action lets touch drags work on phones). */
+
+/*
+ * The hand: one row. Cards overlap just enough to fit the row (down to 60%
+ * overlap, which still shows each card's index); past that, the hand itself
+ * scrolls sideways. --n is the number of cards, set inline.
+ */
+.hand {
+  display: flex;
+  flex-wrap: nowrap;
+  padding: calc(var(--lift) + 12px) 4px 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
 .hand-slot {
-  touch-action: none;
   position: relative;
+  flex: none;
+  /* Allow swipes to scroll the hand; a press-and-hold starts a drag. */
+  touch-action: manipulation;
+}
+.hand-slot + .hand-slot {
+  margin-left: clamp(
+    calc(var(--card-w) * -0.6),
+    calc((100% - var(--n) * var(--card-w) - 1px) / max(1, var(--n) - 1)),
+    6px
+  );
 }
 .hand-slot.dragging {
   z-index: 10;
@@ -641,14 +793,18 @@ select {
   cursor: grabbing;
   box-shadow: 0 14px 24px rgba(0, 0, 0, 0.45);
 }
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+/* In a fanned hand, the "Picked up" tag sits over the visible left edge
+   (right-aligned on the last card so it can't poke past the row). */
+.hand .card .note {
+  left: 0;
+  transform: none;
+}
+.hand .hand-slot:last-child .card .note {
+  left: auto;
+  right: 0;
 }
 
-/* ---- Side panel ----------------------------------------------------------- */
+/* ---- Side panel (desktop) / drawer (compact) ------------------------------ */
 
 .side {
   background: var(--table-deep);
@@ -659,6 +815,10 @@ select {
   gap: 16px;
   min-height: 0;
   overflow: auto;
+}
+.drawer-head,
+.drawer-backdrop {
+  display: none;
 }
 .scores table {
   width: 100%;
@@ -716,8 +876,8 @@ select {
   background: rgba(8, 18, 30, 0.65);
   display: grid;
   place-items: center;
-  padding: 16px;
-  z-index: 20;
+  padding: calc(var(--safe-t) + 16px) calc(var(--safe-r) + 16px) calc(var(--safe-b) + 16px) calc(var(--safe-l) + 16px);
+  z-index: 40;
 }
 .modal {
   background: var(--stock);
@@ -725,8 +885,9 @@ select {
   border-radius: 16px;
   padding: 22px;
   width: min(420px, 100%);
-  max-height: calc(100vh - 32px);
+  max-height: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
   display: grid;
   gap: 12px;
 }
@@ -754,7 +915,7 @@ select {
 
 .bb-slots {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 12px;
 }
 .bb-slot {
@@ -762,6 +923,7 @@ select {
   border-radius: 12px;
   padding: 10px;
   cursor: pointer;
+  min-width: 0;
 }
 .bb-slot.active {
   border-color: var(--brass);
@@ -778,6 +940,9 @@ select {
   gap: 5px;
   flex-wrap: wrap;
   min-height: calc(var(--card-sm) * 1.4);
+}
+.bb-slot select {
+  flex: 1;
 }
 
 .summary-cards {
@@ -807,14 +972,15 @@ table.summary td {
   font-size: 16px;
 }
 
+/* Toasts drop in under the top bar, never over the hand or the actions. */
 .toasts {
   position: fixed;
   left: 50%;
-  bottom: 18px;
+  top: calc(var(--safe-t) + 64px);
   transform: translateX(-50%);
   display: grid;
   gap: 8px;
-  z-index: 30;
+  z-index: 50;
   width: min(460px, calc(100% - 32px));
 }
 .toast {
@@ -830,92 +996,285 @@ table.summary td {
   cursor: pointer;
 }
 
-/* ---- Responsive ----------------------------------------------------------- */
+/* ---- Tablets and small laptops: slimmer sidebar, cards sized to fit ---------- */
 
-@media (max-width: 900px) {
+@media (min-width: 768px) and (max-width: 1100px) and (min-height: 501px) {
+  :root {
+    --card-w: clamp(44px, min(9vw, 10dvh), 76px);
+  }
   .layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) 240px;
   }
-  .side-toggle {
-    display: inline-flex;
+}
+
+/* ---- Compact mode: phones in portrait (<768px wide) and landscape (≤500px tall) ---- */
+
+@media (max-width: 767px), (max-height: 500px) {
+  .lbl-long {
+    display: none;
   }
+  .lbl-short {
+    display: inline;
+  }
+
+  .topbar {
+    gap: 10px;
+    padding-top: calc(var(--safe-t) + 4px);
+    padding-bottom: 4px;
+  }
+  .brand {
+    font-size: 22px;
+  }
+  .round {
+    font-size: 12px;
+    line-height: 1.3;
+  }
+  .round .book {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  /* Top bar shows just the status dot; trouble is spelled out in the opponent row. */
+  .conn .conn-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .opp-conn {
+    display: block;
+    flex: 1 1 0;
+    min-width: 0;
+    color: var(--warn);
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .panel-toggles {
+    display: flex;
+  }
+  .panel-toggles .btn {
+    padding: 0 11px;
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .play {
+    gap: 6px;
+    padding: 6px 10px 6px;
+  }
+  .opponent {
+    padding: 4px 10px;
+    font-size: 14px;
+  }
+  .opponent .muted {
+    font-size: 13px;
+  }
+  .backs {
+    display: none;
+  }
+  .opponent,
+  .mine {
+    border-radius: 12px;
+  }
+  .mine {
+    padding: 6px 8px 4px;
+    gap: 6px;
+  }
+  .status {
+    font-size: 13px;
+    line-height: 1.3;
+  }
+  .hint {
+    font-size: 12px;
+  }
+  .me-meta {
+    font-size: 12px;
+    gap: 6px;
+  }
+  .action-bar {
+    gap: 6px;
+  }
+  .action-bar .btn {
+    padding: 0 12px;
+  }
+
+  .center {
+    gap: 12px;
+  }
+  .piles {
+    gap: 10px;
+    padding-top: 10px;
+  }
+  .pile {
+    font-size: 11px;
+    gap: 3px;
+  }
+  .melds {
+    gap: 8px;
+  }
+  .meld-group {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  /* Owner as a small label beside their melds. */
+  .meld-group h3 {
+    font-size: 12px;
+    margin: 6px 0 0;
+    flex: none;
+    max-width: 64px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .meld-row {
+    gap: 8px;
+    min-width: 0;
+  }
+  .meld {
+    padding: 3px 6px 11px;
+    border-radius: 8px;
+  }
+  .meld-label {
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+  /* Overlapping meld cards; badges move to the visible left edge. */
+  .meld-cards {
+    gap: 0;
+  }
+  .meld-cards > .card + .card {
+    margin-left: calc(var(--card-sm) * -0.42);
+  }
+  .meld-cards .card .badge {
+    left: 0;
+    transform: none;
+    font-size: 10px;
+    padding: 2px 4px;
+    bottom: -8px;
+  }
+
+  /* Drawer for scores and the move log. */
   .side {
     position: fixed;
     top: 0;
     right: 0;
     bottom: 0;
-    width: min(320px, 88vw);
+    width: min(340px, 88vw);
+    padding: calc(var(--safe-t) + 10px) calc(var(--safe-r) + 14px) calc(var(--safe-b) + 14px) 14px;
+    border-left: 1px solid var(--line);
     transform: translateX(100%);
-    transition: transform 0.2s ease;
-    z-index: 15;
+    visibility: hidden;
+    transition:
+      transform 0.2s ease,
+      visibility 0s 0.2s;
+    z-index: 30;
     box-shadow: -10px 0 30px rgba(0, 0, 0, 0.4);
+    overscroll-behavior: contain;
   }
   .side.open {
     transform: none;
+    visibility: visible;
+    transition: transform 0.2s ease;
   }
-  .topbar {
-    gap: 10px;
-    padding: 8px 12px;
-    flex-wrap: wrap;
+  .side .scores,
+  .side .log {
+    display: none;
   }
-  .round {
-    font-size: 13px;
+  .side.show-scores .scores,
+  .side.show-log .log {
+    display: block;
+  }
+  .side .log h3 {
+    display: none;
+  }
+  .drawer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 18, 30, 0.5);
+    z-index: 29;
+  }
+
+  .toasts {
+    top: calc(var(--safe-t) + 56px);
+  }
+  .modal {
+    padding: 16px;
   }
 }
 
-/* Phones in landscape: short screens, so tighten everything vertically. */
-@media (max-height: 500px) {
-  :root {
-    --card-w: 42px;
-    --card-sm: 32px;
+/* Portrait phones: piles centred above the melds. */
+@media (max-width: 599px) {
+  .center {
+    flex-direction: column;
+    gap: 8px;
   }
-  .play {
-    gap: 6px;
-    padding: 8px 12px;
-  }
-  .hand {
-    padding-top: 14px;
-  }
-  .card.selected {
-    transform: translateY(-9px);
-  }
-  .status {
-    font-size: 13px;
-    margin-bottom: 2px;
-  }
-  .opponent,
-  .mine {
-    padding: 4px 10px;
-  }
-  .hand-bar {
-    font-size: 13px;
-  }
-  .hand-bar .btn {
-    padding: 4px 10px;
-  }
-  .btn {
-    padding: 8px 14px;
-  }
-  .lobby {
-    padding: 12px;
+  .piles {
+    align-self: center;
   }
   .bigcard {
-    padding: 36px 32px;
+    padding: 48px 24px;
+  }
+  .title {
+    font-size: 80px;
+  }
+  .invite {
+    flex-direction: column;
+  }
+}
+
+/* Landscape phones: every pixel of height counts. */
+@media (max-height: 500px) {
+  .round {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .round .book {
+    -webkit-line-clamp: 1;
+  }
+  .status-row {
+    align-items: center;
+  }
+  .status {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .status > * {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hand {
+    padding-top: calc(var(--lift) + 10px);
+  }
+  .lobby {
+    padding-top: calc(var(--safe-t) + 12px);
+    padding-bottom: calc(var(--safe-b) + 12px);
+  }
+  .bigcard {
+    padding: 36px 40px;
   }
   .title {
     font-size: 64px;
   }
-}
-
-@media (max-width: 560px) {
-  .center {
-    flex-direction: column;
-  }
-  .conn {
-    font-size: 12px;
-  }
-  .bigcard {
-    padding: 48px 26px;
+  .bigcard-body {
+    gap: 12px;
   }
 }
 
